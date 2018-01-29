@@ -1,0 +1,418 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<job
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns="urn:proactive:jobdescriptor:3.8"
+     xsi:schemaLocation="urn:proactive:jobdescriptor:3.8 http://www.activeeon.com/public_content/schemas/proactive/jobdescriptor/3.8/schedulerjob.xsd"
+    name="telemetries_verification" 
+    priority="normal"
+    onTaskError="continueJobExecution"
+     maxNumberOfExecution="2">
+  <genericInformation>
+    <info name="var1" value="val1 "/>
+    <info name="var2" value="val2 "/>
+  </genericInformation>
+  <taskFlow>
+    <task name="Split">
+      <description>
+        <![CDATA[ This task defines some input, here strings to be processed. ]]>
+      </description>
+      <scriptExecutable>
+        <script>
+          <code language="groovy">
+            <![CDATA[
+println "START telemetries verification Job"
+
+result = [0:"TcInput_default.txt,TmInput_wrongOrder.txt"]
+
+variables.put("size", result.size())
+]]>
+          </code>
+        </script>
+      </scriptExecutable>
+      <controlFlow >
+        <replicate>
+          <script>
+            <code language="groovy">
+              <![CDATA[
+runs=variables.get("size")
+]]>
+            </code>
+          </script>
+        </replicate>
+      </controlFlow>
+    </task>
+    <task name="Process">
+      <description>
+        <![CDATA[ This task will be replicated according to the 'runs' value specified in the replication script.                The replication index is used in each task's instance to select the input. ]]>
+      </description>
+      <depends>
+        <task ref="Split"/>
+      </depends>
+      <inputFiles>
+        <files  includes="thales-poc-project.jar" accessMode="transferFromUserSpace"/>
+      </inputFiles>
+      <forkEnvironment >
+        <additionalClasspath>
+          <pathElement path="thales-poc-project.jar"/>
+        </additionalClasspath>
+      </forkEnvironment>
+      <scriptExecutable>
+        <script>
+          <code language="groovy">
+            <![CDATA[
+import org.ow2.proactive.main.DataParsing
+import org.ow2.proactive.data.tc.TcPacketImpl;
+import org.ow2.proactive.data.tm.TmPacketImpl;
+
+int replication = variables.get('PA_TASK_REPLICATION')
+input = results[0].value()[replication]
+                  
+// connect to the user space
+userspaceapi.connect()
+
+// pull File
+println("START Parse Tc and TM packets task!");
+
+tc_file=new File(input.split(",")[0])
+tm_file=new File(input.split(",")[1])
+userspaceapi.pullFile(tc_file.getName(), tc_file)
+userspaceapi.pullFile(tm_file.getName(), tm_file)
+
+Map<Integer, TcPacketImpl> tc_data;
+Map<Integer, TmPacketImpl> tm_data;
+
+tc_data=DataParsing.importTcPacket(tc_file.getName())
+tm_data=DataParsing.importTmPacket(tm_file.getName())
+
+
+
+result = [tc_data, tm_data] as Map[]
+println "END OF parse Tc and TM packets task"
+]]>
+          </code>
+        </script>
+      </scriptExecutable>
+    </task>
+    <task name="Merge">
+      <description>
+        <![CDATA[ As a merge operation, we simply print the results from previous tasks. ]]>
+      </description>
+      <depends>
+        <task ref="Process"/>
+      </depends>
+      <inputFiles>
+        <files  includes="thales-poc-project.jar" accessMode="transferFromUserSpace"/>
+      </inputFiles>
+      <forkEnvironment >
+        <additionalClasspath>
+          <pathElement path="thales-poc-project.jar"/>
+        </additionalClasspath>
+      </forkEnvironment>
+      <scriptExecutable>
+        <script>
+          <code language="groovy">
+            <![CDATA[
+import org.ow2.proactive.data.tc.TcPacketImpl;
+import org.ow2.proactive.data.tm.TmPacketImpl;
+
+result= results[0].value()
+]]>
+          </code>
+        </script>
+      </scriptExecutable>
+    </task>
+    <task name="Check_hardware_TM_packet">
+      <description>
+        <![CDATA[ The simplest task, ran by a groovy engine. ]]>
+      </description>
+      <depends>
+        <task ref="Merge"/>
+      </depends>
+      <inputFiles>
+        <files  includes="thales-poc-project.jar" accessMode="transferFromUserSpace"/>
+      </inputFiles>
+      <forkEnvironment >
+        <additionalClasspath>
+          <pathElement path="thales-poc-project.jar"/>
+        </additionalClasspath>
+      </forkEnvironment>
+      <scriptExecutable>
+        <script>
+          <code language="groovy">
+            <![CDATA[
+import org.ow2.proactive.data.tc.TcPacketImpl
+import org.ow2.proactive.data.tm.TmPacketImpl
+
+println "START Check hardware TM Packets task !!"
+Map<Integer, TcPacketImpl> tc_data= results[0].value()[0]
+Map<Integer, TmPacketImpl> tm_data= results[0].value()[1]
+
+List<Integer> hardwareTm = new ArrayList<>();
+
+        for(Map.Entry<Integer, TmPacketImpl> entry : tm_data.entrySet()) {
+            if(entry.getValue().getHexaContent().substring(0,2).equals("10")){
+                hardwareTm.add(entry.getKey());
+            }
+
+        }
+if(hardwareTm.size()==0){
+  println("No hardware TM packet")
+}
+else{
+println("Hardware TM packet(s) in line(s)=" + hardwareTm.toString())
+}
+println "END OF check hardware TM Packets task"
+result= results[0].value()
+variables.put("hardwareTm", hardwareTm)
+]]>
+          </code>
+        </script>
+      </scriptExecutable>
+    </task>
+    <task name="Check_TM_packet_number">
+      <description>
+        <![CDATA[ The simplest task, ran by a groovy engine. ]]>
+      </description>
+      <depends>
+        <task ref="Merge"/>
+      </depends>
+      <inputFiles>
+        <files  includes="thales-poc-project.jar" accessMode="transferFromUserSpace"/>
+      </inputFiles>
+      <forkEnvironment >
+        <additionalClasspath>
+          <pathElement path="thales-poc-project.jar"/>
+        </additionalClasspath>
+      </forkEnvironment>
+      <scriptExecutable>
+        <script>
+          <code language="groovy">
+            <![CDATA[
+import org.ow2.proactive.data.tc.TcPacketImpl
+import org.ow2.proactive.data.tm.TmPacketImpl
+
+
+println "START check the number of received TM Packets task !!!"
+
+Map<Integer, TcPacketImpl> tc_data= results[0].value()[0]
+Map<Integer, TmPacketImpl> tm_data= results[0].value()[1]
+List<Integer> faultyTc1=new ArrayList<>();
+
+Map<Integer, TcPacketImpl> tc_data_copy=new HashMap<>(tc_data);
+		Map<String, List>groupedTmByHeader= new HashMap();
+        for(Map.Entry<Integer, TmPacketImpl> entry : tm_data.entrySet()) {
+            TmPacketImpl tm_packet = entry.getValue();
+                       if (! groupedTmByHeader.containsKey(tm_packet.getHexaContent())) {
+                           groupedTmByHeader.put(tm_packet.getHexaContent(), new LinkedList<TmPacketImpl>());
+                       }
+            groupedTmByHeader.get(tm_packet.getHexaContent()).add(tm_packet);
+                   }
+        for(Iterator<Map.Entry<Integer, TcPacketImpl>> tc_iterator = tc_data_copy.entrySet().iterator(); tc_iterator.hasNext(); ) {
+            Map.Entry<Integer, TcPacketImpl> tc_entry = tc_iterator.next();
+            if(tc_entry.getValue().getHexaContent().substring(0,2).equals("10")) {
+                //no Tm packet are expected
+                tc_iterator.remove();
+            }else {
+                String header=tc_entry.getValue().getHexaContent().substring(0,8).toLowerCase();
+                int nbrOfTmAcceptancePacket=0;
+                 for(int i=0;i<4;i++){
+                    nbrOfTmAcceptancePacket+=tc_entry.getValue().getBinaryAckFlag()[i];
+                }
+                if(groupedTmByHeader.containsKey(header)){
+                    if(!(groupedTmByHeader.get(header).size()==nbrOfTmAcceptancePacket)){
+                        faultyTc1.add(tc_entry.getKey());
+                        tc_iterator.remove();
+                    }
+                }
+                else{
+                    faultyTc1.add(tc_entry.getKey());
+                    tc_iterator.remove();
+                }
+            }
+        }
+
+
+
+if(faultyTc1.size()==0){
+  println("The number of received TM packets according to the TC packets sent is correct")
+}
+else{
+println("TM packets of the following TC packet(s) " + faultyTc1.toString() + " are mising or not complete")
+}
+println "END OF check the number of received TM Packets task"
+result= results[0].value()
+variables.put("faultyTc1", faultyTc1)
+]]>
+          </code>
+        </script>
+      </scriptExecutable>
+    </task>
+    <task name="Export_results">
+      <description>
+        <![CDATA[ The simplest task, ran by a groovy engine. ]]>
+      </description>
+      <depends>
+        <task ref="Check_TM_packet_type_and_order"/>
+        <task ref="Check_TM_packet_number"/>
+        <task ref="Check_hardware_TM_packet"/>
+      </depends>
+      <inputFiles>
+        <files  includes="thales-poc-project.jar" accessMode="transferFromUserSpace"/>
+      </inputFiles>
+      <forkEnvironment >
+        <additionalClasspath>
+          <pathElement path="thales-poc-project.jar"/>
+        </additionalClasspath>
+      </forkEnvironment>
+      <scriptExecutable>
+        <script>
+          <code language="groovy">
+            <![CDATA[
+import org.ow2.proactive.main.DataExport
+import org.ow2.proactive.data.tc.TcPacketImpl
+import org.ow2.proactive.data.tm.TmPacketImpl
+
+println "END telemetries verification Job"
+Map<Integer, TcPacketImpl> tc_data= results[0].value()[0]
+Map<Integer, TmPacketImpl> tm_data= results[0].value()[1]
+List<Integer> hardwareTm =variables.get('hardwareTm')
+List<Integer> faulty_tc1=variables.get('faultyTc1')
+List<Integer> faulty_tc2=variables.get('faultyTc2')
+if(hardwareTm==null)
+  hardwareTm = new ArrayList()
+
+if(hardwareTm==null)
+  faulty_tc1 = new ArrayList()
+  
+if(hardwareTm==null)
+  faulty_tc1 = new ArrayList()
+
+ for(int i=0;i<faulty_tc2.size();i++){
+                if(!faulty_tc1.contains(faulty_tc2.get(i))){
+                    faulty_tc1.add(faulty_tc2.get(i));
+                }
+            }
+DataExport.exportTcPacketHtml(tc_data,"TcOutput.html",faulty_tc1)
+DataExport.exportTmPacketHtml(tm_data,"TmOutput.html",hardwareTm)
+
+
+// connect to the user space
+userspaceapi.connect()
+
+// push file
+tc_out = new File("TcOutput.html");
+tm_out = new File("TmOutput.html");
+userspaceapi.pushFile(tc_out, tc_out.getName())
+userspaceapi.pushFile(tm_out, tm_out.getName())
+
+// Expose the resulting chart image
+result = tc_out.getBytes()
+resultMetadata.put("file.name", "TcOutput.html")
+resultMetadata.put("content.type", "html")
+]]>
+          </code>
+        </script>
+      </scriptExecutable>
+    </task>
+    <task name="Check_TM_packet_type_and_order">
+      <description>
+        <![CDATA[ The simplest task, ran by a groovy engine. ]]>
+      </description>
+      <depends>
+        <task ref="Merge"/>
+      </depends>
+      <inputFiles>
+        <files  includes="thales-poc-project.jar" accessMode="transferFromUserSpace"/>
+      </inputFiles>
+      <forkEnvironment >
+        <additionalClasspath>
+          <pathElement path="thales-poc-project.jar"/>
+        </additionalClasspath>
+      </forkEnvironment>
+      <scriptExecutable>
+        <script>
+          <code language="groovy">
+            <![CDATA[
+import org.ow2.proactive.data.tc.TcPacketImpl
+import org.ow2.proactive.data.tm.TmPacketImpl
+
+
+println "START check TM Packet type and order task !!!"
+Map<Integer, TcPacketImpl> tc_data= results[0].value()[0]
+Map<Integer, TmPacketImpl> tm_data= results[0].value()[1]
+List<Integer> faultyTc2=new ArrayList<>();
+
+Map<Integer, TcPacketImpl> tc_data_copy=new HashMap<>(tc_data);
+       Map<String, List>groupedTmByHeader= new HashMap();
+        for(Map.Entry<Integer, TmPacketImpl> entry : tm_data.entrySet()) {
+            TmPacketImpl tm_packet = entry.getValue();
+                       if (! groupedTmByHeader.containsKey(tm_packet.getHexaContent())) {
+                           groupedTmByHeader.put(tm_packet.getHexaContent(), new LinkedList<TmPacketImpl>());
+                       }
+            groupedTmByHeader.get(tm_packet.getHexaContent()).add(tm_packet);
+                   }
+        for(Iterator<Map.Entry<Integer, TcPacketImpl>> tc_iterator = tc_data_copy.entrySet().iterator(); tc_iterator.hasNext(); ) {
+            Map.Entry<Integer, TcPacketImpl> tc_entry = tc_iterator.next();
+            if(tc_entry.getValue().getHexaContent().substring(0,2).equals("10")) {
+                //no Tm packet are expected
+                tc_iterator.remove();
+            }else {
+                String header=tc_entry.getValue().getHexaContent().substring(0,8).toLowerCase();
+                if(groupedTmByHeader.containsKey(header)){
+                    int i=3;
+                    int indexTm=0;
+                    int j=7;
+                    boolean ret=true;
+                    int maxIndexTm=groupedTmByHeader.get(header).size();
+                    while(i>=0 && ret && indexTm<maxIndexTm){
+                        int[] tmServiceSubType;
+                        if(tc_entry.getValue().getBinaryAckFlag()[i]==1){
+                            if(groupedTmByHeader.get(header).get(indexTm)!=null){
+                                tmServiceSubType=groupedTmByHeader.get(header).get(indexTm).getServiceSubType();
+                                if(tmServiceSubType[j]==1){
+                                    i--;
+                                    j-=2;
+                                    indexTm++;
+                                }
+                                else{
+                                    ret=false;
+                                }
+                            }
+                            else{
+                                ret=false;
+                            }
+
+                        }
+                        else{
+                            i--;
+                            j-=2;
+                        }
+                    }
+                    if(!ret){
+                        faultyTc2.add(tc_entry.getKey());
+                        tc_iterator.remove();
+                    }
+                }
+                else{
+                    faultyTc2.add(tc_entry.getKey());
+                    tc_iterator.remove();
+                }
+            }
+        }
+
+if(faultyTc2.size()==0){
+  println("The received TM packets are of good service type type and well ordered")
+}
+else{
+println("TM packets of the folowing TC packet(s) " + faultyTc2.toString() + " have a wrong type or are not well ordered")
+}
+println "END OF check TM Packet type and order task"
+result= results[0].value()
+variables.put("faultyTc2", faultyTc2)
+]]>
+          </code>
+        </script>
+      </scriptExecutable>
+    </task>
+  </taskFlow>
+</job>
